@@ -65,7 +65,7 @@ const StrategyDescriptionModal: React.FC<{
     setError('');
     
     if (!process.env.API_KEY) {
-      setError("API Key is not configured.");
+      setError("مفتاح API غير مهيأ.");
       setIsLoading(false);
       return;
     }
@@ -83,7 +83,15 @@ const StrategyDescriptionModal: React.FC<{
 
     } catch (e) {
       console.error(e);
-      setError('Failed to generate summary. Please try again.');
+      let message = 'فشل في إنشاء الملخص. يرجى المحاولة مرة أخرى.';
+      if (e instanceof Error) {
+        if (e.message.toLowerCase().includes('api key')) {
+          message = 'مفتاح API غير صالح. يرجى الاتصال بالمسؤول.';
+        } else if (e.message.toLowerCase().includes('fetch') || e.message.toLowerCase().includes('network')) {
+          message = 'خطأ في الشبكة. يرجى التحقق من اتصالك بالإنترنت.';
+        }
+      }
+      setError(message);
     } finally {
       setIsLoading(false);
     }
@@ -149,6 +157,8 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
     key: null,
     direction: 'ascending',
   });
+  const [isSuggesting, setIsSuggesting] = useState(false);
+  const [suggestionError, setSuggestionError] = useState('');
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -193,11 +203,11 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
     }));
   };
   
-  const handleAddStrategy = () => {
+  const handleAddStrategy = (name = '') => {
     const newId = formData.strategies.length > 0 ? Math.max(...formData.strategies.map(s => s.id)) + 1 : 1;
     const newStrategy: StrategyUsage = {
       id: newId,
-      name: '',
+      name,
       traditional: 0,
       active: 0,
       research: 0,
@@ -207,6 +217,55 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
       ...prev,
       strategies: [...prev.strategies, newStrategy],
     }));
+  };
+  
+  const handleSmartSuggest = async () => {
+    setIsSuggesting(true);
+    setSuggestionError('');
+
+    if (!process.env.API_KEY) {
+      setSuggestionError("مفتاح API غير مهيأ.");
+      setIsSuggesting(false);
+      return;
+    }
+
+    try {
+      const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+      const existingStrategies = formData.strategies.map(s => s.name).filter(Boolean).join(', ');
+      
+      const prompt = `
+        بصفتك خبيرًا تربويًا، اقترح استراتيجية تدريس واحدة جديدة ومبتكرة وفعالة لمادة "${formData.subject}" للصف "${formData.grade}".
+        الاستراتيجيات الحالية المستخدمة هي: [${existingStrategies}].
+        يجب أن تكون الاستراتيجية المقترحة مكملة أو بديلة للنهج الحالي.
+        يرجى تقديم اسم الاستراتيجية فقط باللغة العربية، بدون أي مقدمات أو شروحات إضافية.
+      `;
+
+      const response = await ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+      });
+
+      const suggestedName = response.text.trim().replace(/["*.]/g, ''); // Clean up the output
+      if (suggestedName) {
+        handleAddStrategy(suggestedName);
+      } else {
+        setSuggestionError('لم يتمكن الذكاء الاصطناعي من اقتراح استراتيجية. حاول مرة أخرى.');
+      }
+
+    } catch (e) {
+      console.error(e);
+      let message = 'حدث خطأ أثناء الحصول على الاقتراح. يرجى المحاولة مرة أخرى.';
+      if (e instanceof Error) {
+        if (e.message.toLowerCase().includes('api key')) {
+          message = 'مفتاح API غير صالح. يرجى الاتصال بالمسؤول.';
+        } else if (e.message.toLowerCase().includes('fetch') || e.message.toLowerCase().includes('network')) {
+          message = 'خطأ في الشبكة. يرجى التحقق من اتصالك بالإنترنت.';
+        }
+      }
+      setSuggestionError(message);
+    } finally {
+      setIsSuggesting(false);
+    }
   };
 
   const openDescriptionModal = (id: number) => {
@@ -239,10 +298,11 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
     let sortableStrategies = [...formData.strategies];
     if (sortConfig.key !== null) {
       sortableStrategies.sort((a, b) => {
-        if (a[sortConfig.key!] < b[sortConfig.key!]) {
+        const key = sortConfig.key as keyof Omit<StrategyUsage, 'id' | 'name' | 'description'>;
+        if (a[key] < b[key]) {
           return sortConfig.direction === 'ascending' ? -1 : 1;
         }
-        if (a[sortConfig.key!] > b[sortConfig.key!]) {
+        if (a[key] > b[key]) {
           return sortConfig.direction === 'ascending' ? 1 : -1;
         }
         return 0;
@@ -251,13 +311,10 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
     return sortableStrategies;
   }, [formData.strategies, sortConfig]);
 
-  const getSortIndicator = (key: keyof Omit<StrategyUsage, 'id' | 'name' | 'description'>) => {
-    if (sortConfig.key !== key) return null;
-    return sortConfig.direction === 'ascending' ? '▲' : '▼';
-  };
-
   return (
     <div className="p-8 bg-gray-50 min-h-full" dir="rtl">
+      <h1 className="text-3xl font-bold text-gray-800 mb-8">لوحة الإدخال</h1>
+      
       {isModalOpen && strategyForModal && (
         <StrategyDescriptionModal
           strategy={strategyForModal}
@@ -265,102 +322,95 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
           onSave={saveStrategyDescription}
         />
       )}
-      <header className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-800 mb-2">لوحة إدخال البيانات</h1>
-        <p className="text-md text-gray-500">{schoolInfo.branch} - العام الدراسي: {schoolInfo.academicYear}</p>
-      </header>
-      
-      <form className="space-y-8">
-        <section className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">المعلومات الأساسية</h2>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            <InputField label="اسم المعلم" name="teacherName" value={formData.teacherName} onChange={handleInputChange} />
-            <SelectField label="الفصل الدراسي" name="semester" value={formData.semester} onChange={handleInputChange} options={["الفصل الدراسي الأول", "الفصل الدراسي الثاني"]} />
-            <SelectField label="الصف" name="grade" value={formData.grade} onChange={handleInputChange} options={GRADES} />
-            <SelectField label="المادة" name="subject" value={formData.subject} onChange={handleInputChange} options={subjects.length > 0 ? subjects : INITIAL_SUBJECTS} />
-            <InputField label="عدد الوحدات" name="units" type="number" value={formData.units} onChange={handleInputChange} />
-            <InputField label="عدد الدروس" name="lessons" type="number" value={formData.lessons} onChange={handleInputChange} />
-          </div>
-        </section>
 
-        <section className="bg-white p-6 rounded-lg shadow-md">
-          <h2 className="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">استراتيجيات التدريس (عدد مرات التنفيذ)</h2>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm text-right text-gray-500">
-              <thead className="text-xs text-gray-700 uppercase bg-gray-100">
-                <tr>
-                  <th scope="col" className="px-6 py-3">الاستراتيجية</th>
-                  <th scope="col" className="px-3 py-3 cursor-pointer" onClick={() => requestSort('traditional')}>
-                    تقليدي {getSortIndicator('traditional')}
-                  </th>
-                  <th scope="col" className="px-3 py-3 cursor-pointer" onClick={() => requestSort('active')}>
-                    نشط {getSortIndicator('active')}
-                  </th>
-                  <th scope="col" className="px-3 py-3 cursor-pointer" onClick={() => requestSort('research')}>
-                    بحثي {getSortIndicator('research')}
-                  </th>
-                  <th scope="col" className="px-3 py-3 text-center">الوصف</th>
-                  <th scope="col" className="px-3 py-3 text-center">حذف</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedStrategies.map((strategy) => (
-                  <tr key={strategy.id} className="bg-white border-b hover:bg-gray-50">
-                    <td className="px-6 py-4">
-                      <input type="text" name="name" value={strategy.name} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-full bg-transparent border-b focus:outline-none focus:border-custom-blue" />
-                    </td>
-                    <td className="px-3 py-4">
-                      <input type="number" name="traditional" min="0" value={strategy.traditional} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-20 text-center bg-gray-50 border border-gray-300 rounded-md p-1" />
-                    </td>
-                    <td className="px-3 py-4">
-                       <input type="number" name="active" min="0" value={strategy.active} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-20 text-center bg-gray-50 border border-gray-300 rounded-md p-1" />
-                    </td>
-                    <td className="px-3 py-4">
-                       <input type="number" name="research" min="0" value={strategy.research} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-20 text-center bg-gray-50 border border-gray-300 rounded-md p-1" />
-                    </td>
-                    <td className="px-3 py-4 text-center">
-                      <button
-                        type="button"
-                        onClick={() => openDescriptionModal(strategy.id)}
-                        className="text-xl text-blue-500 hover:text-blue-700 disabled:text-gray-400 p-1 rounded-full hover:bg-blue-100 transition-colors"
-                        title="إضافة أو تعديل الوصف"
-                        disabled={!strategy.name.trim()}
-                      >
-                        📝
-                      </button>
-                    </td>
-                    <td className="px-3 py-4 text-center">
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteStrategy(strategy.id)}
-                        className="text-xl text-red-500 hover:text-red-700 p-1 rounded-full hover:bg-red-100 transition-colors"
-                        title="حذف الاستراتيجية"
-                      >
-                        🗑️
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={handleAddStrategy}
-              className="px-6 py-2 bg-custom-blue text-white font-semibold rounded-lg shadow-sm hover:bg-custom-blue/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-custom-blue transition-colors duration-200"
-            >
-              + إضافة استراتيجية جديدة
-            </button>
-          </div>
-        </section>
-
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            <NestedInputSection title="الأنشطة اللاصفية" data={formData.extracurricular} category="extracurricular" onChange={handleNestedInputChange} labels={{ trip: "رحلة", radio: "إذاعة", competition: "مسابقة", newspaper: "صحيفة", initiative: "مبادرة", visit: "زيارة", research: "بحث", other: "أخرى" }} />
-            <NestedInputSection title="غرف المصادر" data={formData.resourceRooms} category="resourceRooms" onChange={handleNestedInputChange} labels={{ library: "مكتبة", showroom: "معرض", interactiveBoard: "سبورة تفاعلية", scienceLab: "معمل علوم", other: "أخرى" }} />
-            <NestedInputSection title="مخروط الخبرة لإدجار ديل" data={formData.experienceCone} category="experienceCone" onChange={handleNestedInputChange} labels={{ verbalSymbols: "الرموز اللفظية (كلمات ومحاضرات)", visualSymbols: "الرموز البصرية (صور وفيديوهات)", sensoryObservation: "الملاحظة الحسية (مشاهدات وعروض)", alternativeExperiences: "الخبرات البديلة (نماذج وعينات)", directExperiences: "الخبرات المباشرة (تركيب وصيانة)" }} />
+      {/* General Information */}
+      <section className="bg-white p-6 rounded-lg shadow-md mb-8">
+        <h2 className="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">معلومات عامة</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          <InputField label="اسم المعلم" name="teacherName" value={formData.teacherName} onChange={handleInputChange} />
+          <SelectField label="الفصل الدراسي" name="semester" value={formData.semester} onChange={handleInputChange} options={["الفصل الدراسي الأول", "الفصل الدراسي الثاني"]} />
+          <SelectField label="الصف" name="grade" value={formData.grade} onChange={handleInputChange} options={GRADES} />
+          <SelectField label="المادة" name="subject" value={formData.subject} onChange={handleInputChange} options={subjects} />
+          <InputField label="عدد الوحدات" name="units" type="number" value={formData.units} onChange={handleInputChange} />
+          <InputField label="عدد الدروس" name="lessons" type="number" value={formData.lessons} onChange={handleInputChange} />
         </div>
-      </form>
+      </section>
+
+      {/* Strategies Table */}
+      <section className="bg-white p-6 rounded-lg shadow-md mb-8">
+        <div className="flex justify-between items-center mb-4 border-b pb-2">
+            <h2 className="text-xl font-semibold text-gray-700">استراتيجيات التدريس</h2>
+            <div className="flex space-x-2 space-x-reverse">
+                <button onClick={() => handleAddStrategy('')} className="px-4 py-2 text-sm bg-custom-blue text-white font-semibold rounded-lg shadow-sm hover:bg-custom-blue/90 transition-colors">
+                    + إضافة استراتيجية
+                </button>
+                <button onClick={handleSmartSuggest} disabled={isSuggesting} className="px-4 py-2 text-sm bg-custom-teal text-white font-semibold rounded-lg shadow-sm hover:bg-custom-teal/90 transition-colors disabled:opacity-50">
+                    {isSuggesting ? '...جاري الاقتراح' : '💡 اقتراح ذكي'}
+                </button>
+            </div>
+        </div>
+        {suggestionError && <p className="text-red-500 text-sm mb-4">{suggestionError}</p>}
+        <div className="overflow-x-auto">
+            <table className="w-full text-sm text-center text-gray-600">
+                <thead className="text-xs text-gray-700 uppercase bg-gray-100">
+                    <tr>
+                        <th className="px-4 py-3 w-2/5 text-right">الاستراتيجية</th>
+                        <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('traditional')}>
+                          تقليدي {sortConfig.key === 'traditional' ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : ''}
+                        </th>
+                        <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('active')}>
+                          نشط {sortConfig.key === 'active' ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : ''}
+                        </th>
+                        <th className="px-4 py-3 cursor-pointer" onClick={() => requestSort('research')}>
+                          بحثي {sortConfig.key === 'research' ? (sortConfig.direction === 'ascending' ? '▲' : '▼') : ''}
+                        </th>
+                        <th className="px-4 py-3">إجراءات</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {sortedStrategies.map((s, index) => (
+                        <tr key={s.id} className="border-b hover:bg-gray-50">
+                            <td className="px-2 py-2">
+                                <input type="text" name="name" value={s.name} onChange={(e) => handleStrategyChange(s.id, e)} className="w-full bg-transparent border border-gray-300 rounded px-2 py-1" placeholder={`استراتيجية ${index + 1}`} />
+                            </td>
+                            <td className="px-2 py-2"><input type="number" min="0" name="traditional" value={s.traditional} onChange={(e) => handleStrategyChange(s.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
+                            <td className="px-2 py-2"><input type="number" min="0" name="active" value={s.active} onChange={(e) => handleStrategyChange(s.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
+                            <td className="px-2 py-2"><input type="number" min="0" name="research" value={s.research} onChange={(e) => handleStrategyChange(s.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
+                            <td className="px-2 py-2 flex justify-center items-center space-x-1 space-x-reverse">
+                                <button onClick={() => openDescriptionModal(s.id)} className="text-blue-500 hover:text-blue-700 p-1" title="إضافة/تعديل الوصف">📝</button>
+                                <button onClick={() => handleDeleteStrategy(s.id)} className="text-red-500 hover:text-red-700 p-1 font-bold" title="حذف الاستراتيجية">🗑️</button>
+                            </td>
+                        </tr>
+                    ))}
+                </tbody>
+            </table>
+        </div>
+      </section>
+
+      {/* Other Sections */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+        <NestedInputSection 
+          title="الأنشطة اللاصفية"
+          data={formData.extracurricular}
+          category="extracurricular"
+          onChange={handleNestedInputChange}
+          labels={{ trip: "رحلة", radio: "إذاعة", competition: "مسابقة", newspaper: "صحيفة", initiative: "مبادرة", visit: "زيارة", research: "بحث", other: "أخرى" }}
+        />
+        <NestedInputSection 
+          title="غرف المصادر"
+          data={formData.resourceRooms}
+          category="resourceRooms"
+          onChange={handleNestedInputChange}
+          labels={{ library: "مكتبة", showroom: "معرض", interactiveBoard: "سبورة", scienceLab: "معمل", other: "أخرى" }}
+        />
+        <NestedInputSection 
+          title="مخروط الخبرة"
+          data={formData.experienceCone}
+          category="experienceCone"
+          onChange={handleNestedInputChange}
+          labels={{ verbalSymbols: "رموز لفظية", visualSymbols: "رموز بصرية", sensoryObservation: "ملاحظة حسية", alternativeExperiences: "خبرات بديلة", directExperiences: "خبرات مباشرة" }}
+        />
+      </div>
     </div>
   );
 };

@@ -8,9 +8,10 @@ interface SettingsProps {
   setSubjects: React.Dispatch<React.SetStateAction<string[]>>;
   fontSize: number;
   setFontSize: React.Dispatch<React.SetStateAction<number>>;
+  onResetAllData: () => void;
 }
 
-const Settings: React.FC<SettingsProps> = ({ schoolInfo, setSchoolInfo, subjects, setSubjects, fontSize, setFontSize }) => {
+const Settings: React.FC<SettingsProps> = ({ schoolInfo, setSchoolInfo, subjects, setSubjects, fontSize, setFontSize, onResetAllData }) => {
   const [newSubject, setNewSubject] = useState('');
 
   const handleInfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -153,6 +154,25 @@ const Settings: React.FC<SettingsProps> = ({ schoolInfo, setSchoolInfo, subjects
               className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-custom-blue"
             />
           </div>
+        </div>
+      </div>
+
+      {/* Danger Zone */}
+      <div className="mt-8 bg-red-50 p-6 rounded-lg shadow-md border border-red-200">
+        <h2 className="text-xl font-semibold text-red-800 mb-4 border-b border-red-200 pb-2">منطقة الخطر</h2>
+        <div className="space-y-4">
+          <div>
+            <h3 className="font-medium text-gray-800">إعادة تعيين بيانات التطبيق</h3>
+            <p className="text-sm text-gray-600 mt-1">
+              سيؤدي هذا الإجراء إلى حذف جميع البيانات المدخلة، بما في ذلك معلومات المدرسة، وبيانات النماذج، والمواد الدراسية المخصصة، وإعادتها إلى الإعدادات الأولية.
+            </p>
+          </div>
+          <button
+            onClick={onResetAllData}
+            className="w-full px-4 py-2 bg-red-600 text-white font-semibold rounded-lg shadow-sm hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500 transition-colors duration-200"
+          >
+            إعادة تعيين جميع البيانات
+          </button>
         </div>
       </div>
     </div>

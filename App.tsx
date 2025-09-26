@@ -33,6 +33,22 @@ const App: React.FC = () => {
     document.documentElement.style.fontSize = `${fontSize}px`;
   }, [fontSize]);
 
+  const handleResetAllData = () => {
+    if (window.confirm('هل أنت متأكد من أنك تريد إعادة تعيين كافة البيانات إلى حالتها الأولية؟ لا يمكن التراجع عن هذا الإجراء.')) {
+      setSchoolInfo({
+        name: 'اسم المدرسة الافتراضي',
+        logo: null,
+        branch: 'الفرع الرئيسي',
+        academicYear: `2025/2026 م - 1447 هـ`,
+      });
+      setFormData(INITIAL_FORM_DATA);
+      setSubjects(INITIAL_SUBJECTS);
+      setFontSize(16);
+      alert('تمت إعادة تعيين جميع البيانات بنجاح.');
+      setCurrentView('dashboard'); // Switch to a safe view after reset
+    }
+  };
+
 
   const renderView = () => {
     switch (currentView) {
@@ -41,7 +57,7 @@ const App: React.FC = () => {
       case 'reports':
         return <LazyReports data={formData} schoolInfo={schoolInfo} />;
       case 'settings':
-        return <Settings schoolInfo={schoolInfo} setSchoolInfo={setSchoolInfo} subjects={subjects} setSubjects={setSubjects} fontSize={fontSize} setFontSize={setFontSize} />;
+        return <Settings schoolInfo={schoolInfo} setSchoolInfo={setSchoolInfo} subjects={subjects} setSubjects={setSubjects} fontSize={fontSize} setFontSize={setFontSize} onResetAllData={handleResetAllData} />;
       default:
         return <Dashboard formData={formData} setFormData={setFormData} schoolInfo={{academicYear: schoolInfo.academicYear, branch: schoolInfo.branch}} subjects={subjects} />;
     }

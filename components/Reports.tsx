@@ -115,7 +115,7 @@ const Reports: React.FC<ReportsProps> = ({ data, schoolInfo }) => {
     setAiInsight('');
 
     if (!process.env.API_KEY) {
-      setError("API Key is not configured. Please contact support.");
+      setError("مفتاح API غير مهيأ. يرجى الاتصال بالمسؤول.");
       setIsLoading(false);
       return;
     }
@@ -154,7 +154,15 @@ const Reports: React.FC<ReportsProps> = ({ data, schoolInfo }) => {
       setAiInsight(response.text);
     } catch (e) {
       console.error(e);
-      setError('An error occurred while generating insights. Please try again later.');
+      let message = 'حدث خطأ أثناء إنشاء التحليل. يرجى المحاولة مرة أخرى لاحقًا.';
+      if (e instanceof Error) {
+        if (e.message.toLowerCase().includes('api key')) {
+          message = 'مفتاح API غير صالح. يرجى الاتصال بالمسؤول.';
+        } else if (e.message.toLowerCase().includes('fetch') || e.message.toLowerCase().includes('network')) {
+          message = 'خطأ في الشبكة. يرجى التحقق من اتصالك بالإنترنت.';
+        }
+      }
+      setError(message);
     } finally {
       setIsLoading(false);
     }
