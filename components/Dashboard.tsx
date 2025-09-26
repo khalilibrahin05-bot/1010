@@ -1,5 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useCallback } from 'react';
 import { GoogleGenAI } from "@google/genai";
+import { useToasts } from './Toast';
 import type { FormData, StrategyUsage } from '../types';
 import { GRADES, INITIAL_SUBJECTS } from '../constants';
 
@@ -13,23 +14,23 @@ interface DashboardProps {
   subjects: string[];
 }
 
-const InputField: React.FC<{label: string, name: string, value: string | number, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void, type?: string}> = ({ label, name, value, onChange, type = 'text' }) => (
+const InputField: React.FC<{label: string, name: string, value: string | number, onChange: (e: React.ChangeEvent<HTMLInputElement>) => void, type?: string}> = React.memo(({ label, name, value, onChange, type = 'text' }) => (
   <div>
     <label htmlFor={name} className="block text-sm font-medium text-gray-600 mb-1">{label}</label>
     <input type={type} id={name} name={name} value={value} onChange={onChange} min={type === 'number' ? 0 : undefined} className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-custom-blue focus:border-custom-blue" />
   </div>
-);
+));
 
-const SelectField: React.FC<{label: string, name: string, value: string, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void, options: string[]}> = ({ label, name, value, onChange, options }) => (
+const SelectField: React.FC<{label: string, name: string, value: string, onChange: (e: React.ChangeEvent<HTMLSelectElement>) => void, options: string[]}> = React.memo(({ label, name, value, onChange, options }) => (
   <div>
     <label htmlFor={name} className="block text-sm font-medium text-gray-600 mb-1">{label}</label>
     <select id={name} name={name} value={value} onChange={onChange} className="mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-custom-blue focus:border-custom-blue">
       {options.map(option => <option key={option} value={option}>{option}</option>)}
     </select>
   </div>
-);
+));
 
-const NestedInputSection: React.FC<{title: string, data: Record<string, number>, category: keyof FormData, onChange: (category: keyof FormData, e: React.ChangeEvent<HTMLInputElement>) => void, labels: Record<string, string>}> = ({ title, data, category, onChange, labels }) => (
+const NestedInputSection: React.FC<{title: string, data: Record<string, number>, category: keyof FormData, onChange: (category: keyof FormData, e: React.ChangeEvent<HTMLInputElement>) => void, labels: Record<string, string>}> = React.memo(({ title, data, category, onChange, labels }) => (
     <section className="bg-white p-6 rounded-lg shadow-md">
       <h2 className="text-xl font-semibold text-gray-700 mb-4 border-b pb-2">{title}</h2>
       <div className="space-y-4">
@@ -49,7 +50,7 @@ const NestedInputSection: React.FC<{title: string, data: Record<string, number>,
         ))}
       </div>
     </section>
-);
+));
 
 const StrategyDescriptionModal: React.FC<{
   strategy: StrategyUsage;
@@ -58,21 +59,52 @@ const StrategyDescriptionModal: React.FC<{
 }> = ({ strategy, onClose, onSave }) => {
   const [description, setDescription] = useState(strategy.description);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { addToast } = useToasts();
+  const modalRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    const handleEsc = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleEsc);
+    
+    const timer = setTimeout(() => {
+        modalRef.current?.classList.remove('scale-95', 'opacity-0');
+    }, 10);
+
+    return () => {
+      window.removeEventListener('keydown', handleEsc);
+      clearTimeout(timer);
+    };
+  }, [onClose]);
 
   const handleSummarize = async () => {
     setIsLoading(true);
-    setError('');
     
     if (!process.env.API_KEY) {
-      setError("مفتاح API غير مهيأ.");
+      addToast("مفتاح API غير مهيأ.", 'error');
       setIsLoading(false);
       return;
     }
 
     try {
       const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-      const prompt = `Please provide a concise, professional description in Arabic for the educational strategy named "${strategy.name}". Explain its purpose and how it is typically used in a classroom.`;
+      const strategyTypes = [];
+      if (strategy.traditional > 0) strategyTypes.push('تقليدية');
+      if (strategy.active > 0) strategyTypes.push('نشطة');
+      if (strategy.research > 0) strategyTypes.push('بحثية');
+
+      const typeContext = strategyTypes.length > 0
+        ? `هذه الاستراتيجية مصنفة ضمن الأنواع التالية: ${strategyTypes.join('، ')}.`
+        : '';
+        
+      const prompt = `
+        يرجى تقديم وصف احترافي وموجز باللغة العربية للاستراتيجية التعليمية المسماة "${strategy.name}".
+        ${typeContext}
+        اشرح الغرض منها وكيفية استخدامها عادة في الفصل الدراسي. يجب أن يكون الشرح واضحًا ومناسبًا للمعلمين.
+      `;
       
       const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
@@ -91,7 +123,7 @@ const StrategyDescriptionModal: React.FC<{
           message = 'خطأ في الشبكة. يرجى التحقق من اتصالك بالإنترنت.';
         }
       }
-      setError(message);
+      addToast(message, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -103,9 +135,22 @@ const StrategyDescriptionModal: React.FC<{
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex justify-center items-center z-50" onClick={onClose}>
-      <div className="bg-white p-8 rounded-lg shadow-xl w-full max-w-lg" onClick={(e) => e.stopPropagation()}>
-        <h2 className="text-2xl font-bold mb-4 text-gray-800">وصف استراتيجية: {strategy.name}</h2>
+    <div 
+        className="fixed inset-0 bg-black bg-opacity-60 flex justify-center items-center z-50 p-4" 
+        onClick={onClose}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="strategyModalTitle"
+    >
+      <div 
+        ref={modalRef}
+        className="bg-white p-6 rounded-lg shadow-xl w-full max-w-lg transform transition-all duration-300 ease-in-out scale-95 opacity-0"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-start mb-4">
+            <h2 id="strategyModalTitle" className="text-2xl font-bold text-gray-800">وصف استراتيجية: {strategy.name}</h2>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-3xl leading-none" aria-label="إغلاق">&times;</button>
+        </div>
         
         <textarea
           value={description}
@@ -113,19 +158,14 @@ const StrategyDescriptionModal: React.FC<{
           rows={8}
           className="w-full p-3 border border-gray-300 rounded-md mb-4 focus:outline-none focus:ring-2 focus:ring-custom-blue"
           placeholder="أدخل وصفًا للاستراتيجية هنا..."
+          aria-label="وصف الاستراتيجية"
         />
-
-        {error && (
-            <div className="bg-red-100 border-l-4 border-red-500 text-red-700 p-3 mb-4 rounded-md" role="alert">
-                <p className="font-bold">حدث خطأ</p>
-                <p>{error}</p>
-            </div>
-        )}
 
         <div className="flex justify-between items-center flex-wrap gap-4">
           <button
             onClick={handleSummarize}
-            disabled={isLoading}
+            disabled={isLoading || !strategy.name}
+            title={!strategy.name ? "يرجى إدخال اسم للاستراتيجية أولاً" : "تلخيص بالذكاء الاصطناعي"}
             className="px-4 py-2 bg-custom-green text-white font-semibold rounded-lg shadow-sm hover:bg-custom-green/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-custom-green transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
           >
             {isLoading ? (
@@ -150,6 +190,36 @@ const StrategyDescriptionModal: React.FC<{
   );
 };
 
+const StrategyRow = React.memo(({
+    strategy,
+    index,
+    handleStrategyChange,
+    openDescriptionModal,
+    handleDeleteStrategy
+}: {
+    strategy: StrategyUsage;
+    index: number;
+    handleStrategyChange: (id: number, e: React.ChangeEvent<HTMLInputElement>) => void;
+    openDescriptionModal: (id: number) => void;
+    handleDeleteStrategy: (id: number) => void;
+}) => {
+    return (
+        <tr className="border-b hover:bg-gray-50">
+            <td className="px-2 py-2">
+                <input type="text" name="name" value={strategy.name} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-full bg-transparent border border-gray-300 rounded px-2 py-1" placeholder={`استراتيجية ${index + 1}`} />
+            </td>
+            <td className="px-2 py-2"><input type="number" min="0" name="traditional" value={strategy.traditional} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
+            <td className="px-2 py-2"><input type="number" min="0" name="active" value={strategy.active} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
+            <td className="px-2 py-2"><input type="number" min="0" name="research" value={strategy.research} onChange={(e) => handleStrategyChange(strategy.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
+            <td className="px-2 py-2 flex justify-center items-center space-x-1 space-x-reverse">
+                <button onClick={() => openDescriptionModal(strategy.id)} className="text-blue-500 hover:text-blue-700 p-1" title="إضافة/تعديل الوصف">📝</button>
+                <button onClick={() => handleDeleteStrategy(strategy.id)} className="text-red-500 hover:text-red-700 p-1 font-bold" title="حذف الاستراتيجية">🗑️</button>
+            </td>
+        </tr>
+    );
+});
+
+
 const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo, subjects }) => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [selectedStrategyId, setSelectedStrategyId] = useState<number | null>(null);
@@ -158,17 +228,17 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
     direction: 'ascending',
   });
   const [isSuggesting, setIsSuggesting] = useState(false);
-  const [suggestionError, setSuggestionError] = useState('');
+  const { addToast } = useToasts();
 
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
       [name]: e.target.type === 'number' && value !== '' ? Number(value) : value,
     }));
-  };
+  }, [setFormData]);
 
-  const handleNestedInputChange = (category: keyof FormData, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleNestedInputChange = useCallback((category: keyof FormData, e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
       ...prev,
@@ -177,54 +247,59 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
         [name]: value !== '' ? Number(value) : 0,
       },
     }));
-  };
+  }, [setFormData]);
 
-  const handleStrategyChange = (id: number, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleStrategyChange = useCallback((id: number, e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
-    const newStrategies = formData.strategies.map(strategy => {
-      if (strategy.id === id) {
-        const updatedStrategy = { ...strategy };
-        if (name === 'name' || name === 'description') {
-          updatedStrategy[name] = value;
-        } else {
-          updatedStrategy[name as keyof Omit<StrategyUsage, 'id' | 'name' | 'description'>] = value !== '' ? Number(value) : 0;
-        }
-        return updatedStrategy;
-      }
-      return strategy;
-    });
-    setFormData(prev => ({ ...prev, strategies: newStrategies }));
-  };
+    setFormData(prev => ({
+        ...prev,
+        strategies: prev.strategies.map(strategy => {
+            if (strategy.id === id) {
+                const updatedStrategy = { ...strategy };
+                if (name === 'name' || name === 'description') {
+                    updatedStrategy[name] = value;
+                } else {
+                    updatedStrategy[name as keyof Omit<StrategyUsage, 'id' | 'name' | 'description'>] = value !== '' ? Number(value) : 0;
+                }
+                return updatedStrategy;
+            }
+            return strategy;
+        })
+    }));
+  }, [setFormData]);
 
-  const handleDeleteStrategy = (idToDelete: number) => {
-    setFormData(prev => ({
-      ...prev,
-      strategies: prev.strategies.filter(strategy => strategy.id !== idToDelete),
-    }));
-  };
+  const handleDeleteStrategy = useCallback((idToDelete: number) => {
+    if (window.confirm('هل أنت متأكد من حذف هذه الاستراتيجية؟')) {
+      setFormData(prev => ({
+        ...prev,
+        strategies: prev.strategies.filter(strategy => strategy.id !== idToDelete),
+      }));
+    }
+  }, [setFormData]);
   
-  const handleAddStrategy = (name = '') => {
-    const newId = formData.strategies.length > 0 ? Math.max(...formData.strategies.map(s => s.id)) + 1 : 1;
-    const newStrategy: StrategyUsage = {
-      id: newId,
-      name,
-      traditional: 0,
-      active: 0,
-      research: 0,
-      description: '',
-    };
-    setFormData(prev => ({
-      ...prev,
-      strategies: [...prev.strategies, newStrategy],
-    }));
-  };
+  const handleAddStrategy = useCallback((name = '') => {
+    setFormData(prev => {
+        const newId = prev.strategies.length > 0 ? Math.max(...prev.strategies.map(s => s.id)) + 1 : 1;
+        const newStrategy: StrategyUsage = {
+            id: newId,
+            name,
+            traditional: 0,
+            active: 0,
+            research: 0,
+            description: '',
+        };
+        return {
+            ...prev,
+            strategies: [...prev.strategies, newStrategy],
+        };
+    });
+  }, [setFormData]);
   
   const handleSmartSuggest = async () => {
     setIsSuggesting(true);
-    setSuggestionError('');
 
     if (!process.env.API_KEY) {
-      setSuggestionError("مفتاح API غير مهيأ.");
+      addToast("مفتاح API غير مهيأ.", 'error');
       setIsSuggesting(false);
       return;
     }
@@ -247,9 +322,15 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
 
       const suggestedName = response.text.trim().replace(/["*.]/g, ''); // Clean up the output
       if (suggestedName) {
-        handleAddStrategy(suggestedName);
+        const isDuplicate = formData.strategies.some(s => s.name.trim().toLowerCase() === suggestedName.toLowerCase());
+        if (isDuplicate) {
+           addToast(`الاستراتيجية المقترحة "${suggestedName}" موجودة بالفعل.`, 'info');
+        } else {
+           handleAddStrategy(suggestedName);
+           addToast(`تم اقتراح الاستراتيجية: ${suggestedName}`, 'success');
+        }
       } else {
-        setSuggestionError('لم يتمكن الذكاء الاصطناعي من اقتراح استراتيجية. حاول مرة أخرى.');
+        addToast('لم يتمكن الذكاء الاصطناعي من اقتراح استراتيجية. حاول مرة أخرى.', 'warning');
       }
 
     } catch (e) {
@@ -262,29 +343,34 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
           message = 'خطأ في الشبكة. يرجى التحقق من اتصالك بالإنترنت.';
         }
       }
-      setSuggestionError(message);
+      addToast(message, 'error');
     } finally {
       setIsSuggesting(false);
     }
   };
 
-  const openDescriptionModal = (id: number) => {
+  const openDescriptionModal = useCallback((id: number) => {
     setSelectedStrategyId(id);
     setIsModalOpen(true);
-  };
+  }, []);
 
-  const closeDescriptionModal = () => {
+  const closeDescriptionModal = useCallback(() => {
     setSelectedStrategyId(null);
     setIsModalOpen(false);
-  };
+  }, []);
   
-  const saveStrategyDescription = (description: string) => {
+  const saveStrategyDescription = useCallback((description: string) => {
     if (selectedStrategyId === null) return;
-    const newStrategies = formData.strategies.map(s => s.id === selectedStrategyId ? { ...s, description } : s);
-    setFormData(prev => ({ ...prev, strategies: newStrategies }));
-  };
+    setFormData(prev => ({
+        ...prev,
+        strategies: prev.strategies.map(s => s.id === selectedStrategyId ? { ...s, description } : s)
+    }));
+  }, [selectedStrategyId, setFormData]);
   
-  const strategyForModal = formData.strategies.find(s => s.id === selectedStrategyId);
+  const strategyForModal = useMemo(() => 
+    formData.strategies.find(s => s.id === selectedStrategyId),
+    [formData.strategies, selectedStrategyId]
+  );
   
   const requestSort = (key: keyof Omit<StrategyUsage, 'id' | 'name' | 'description'>) => {
     let direction: 'ascending' | 'descending' = 'ascending';
@@ -310,6 +396,18 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
     }
     return sortableStrategies;
   }, [formData.strategies, sortConfig]);
+
+  const strategyTotals = useMemo(() => {
+    return formData.strategies.reduce(
+      (acc, s) => {
+        acc.traditional += s.traditional;
+        acc.active += s.active;
+        acc.research += s.research;
+        return acc;
+      },
+      { traditional: 0, active: 0, research: 0 }
+    );
+  }, [formData.strategies]);
 
   return (
     <div className="p-8 bg-gray-50 min-h-full" dir="rtl">
@@ -349,7 +447,6 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
                 </button>
             </div>
         </div>
-        {suggestionError && <p className="text-red-500 text-sm mb-4">{suggestionError}</p>}
         <div className="overflow-x-auto">
             <table className="w-full text-sm text-center text-gray-600">
                 <thead className="text-xs text-gray-700 uppercase bg-gray-100">
@@ -369,20 +466,25 @@ const Dashboard: React.FC<DashboardProps> = ({ formData, setFormData, schoolInfo
                 </thead>
                 <tbody>
                     {sortedStrategies.map((s, index) => (
-                        <tr key={s.id} className="border-b hover:bg-gray-50">
-                            <td className="px-2 py-2">
-                                <input type="text" name="name" value={s.name} onChange={(e) => handleStrategyChange(s.id, e)} className="w-full bg-transparent border border-gray-300 rounded px-2 py-1" placeholder={`استراتيجية ${index + 1}`} />
-                            </td>
-                            <td className="px-2 py-2"><input type="number" min="0" name="traditional" value={s.traditional} onChange={(e) => handleStrategyChange(s.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
-                            <td className="px-2 py-2"><input type="number" min="0" name="active" value={s.active} onChange={(e) => handleStrategyChange(s.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
-                            <td className="px-2 py-2"><input type="number" min="0" name="research" value={s.research} onChange={(e) => handleStrategyChange(s.id, e)} className="w-16 text-center bg-gray-50 border border-gray-300 rounded p-1" /></td>
-                            <td className="px-2 py-2 flex justify-center items-center space-x-1 space-x-reverse">
-                                <button onClick={() => openDescriptionModal(s.id)} className="text-blue-500 hover:text-blue-700 p-1" title="إضافة/تعديل الوصف">📝</button>
-                                <button onClick={() => handleDeleteStrategy(s.id)} className="text-red-500 hover:text-red-700 p-1 font-bold" title="حذف الاستراتيجية">🗑️</button>
-                            </td>
-                        </tr>
+                       <StrategyRow 
+                           key={s.id}
+                           strategy={s}
+                           index={index}
+                           handleStrategyChange={handleStrategyChange}
+                           openDescriptionModal={openDescriptionModal}
+                           handleDeleteStrategy={handleDeleteStrategy}
+                       />
                     ))}
                 </tbody>
+                <tfoot className="bg-gray-100 font-bold text-gray-800">
+                    <tr>
+                        <td className="px-4 py-2 text-right">الإجمالي</td>
+                        <td className="px-4 py-2">{strategyTotals.traditional}</td>
+                        <td className="px-4 py-2">{strategyTotals.active}</td>
+                        <td className="px-4 py-2">{strategyTotals.research}</td>
+                        <td className="px-4 py-2"></td>
+                    </tr>
+                </tfoot>
             </table>
         </div>
       </section>

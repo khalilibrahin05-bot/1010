@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { GoogleGenAI } from "@google/genai";
+import { useToasts } from './Toast';
 import type { FormData, SchoolInfo } from '../types';
 import { PieChart as RechartsPieChart, Pie, Cell, ResponsiveContainer, Sector } from 'recharts';
 
@@ -62,12 +63,13 @@ const InteractivePieChart: React.FC<{ data: { name: string; value: number; color
         return <div className="flex items-center justify-center h-64 text-center text-gray-500">لا توجد بيانات لعرضها.</div>;
     }
 
+    // FIX: The recharts types are outdated and are missing the `activeIndex` and `activeShape` props on the Pie component. Casting to `any` to suppress the type error.
+    const PatchedPie = Pie as any;
+
     return (
         <ResponsiveContainer width="100%" height={280}>
             <RechartsPieChart>
-                {/* FIX: The recharts types are outdated and are missing the `activeIndex` and `activeShape` props on the Pie component. Using @ts-ignore to suppress the type error. */}
-                {/* @ts-ignore */}
-                <Pie
+                <PatchedPie
                     activeIndex={activeIndex}
                     activeShape={renderActiveShape}
                     data={data}
@@ -81,7 +83,7 @@ const InteractivePieChart: React.FC<{ data: { name: string; value: number; color
                     {data.map((entry) => (
                         <Cell key={`cell-${entry.name}`} fill={entry.color} />
                     ))}
-                </Pie>
+                </PatchedPie>
             </RechartsPieChart>
         </ResponsiveContainer>
     );
@@ -107,15 +109,23 @@ interface ReportsProps {
 const Reports: React.FC<ReportsProps> = ({ data, schoolInfo }) => {
   const [aiInsight, setAiInsight] = useState('');
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState('');
+  const { addToast } = useToasts();
+  
+  const strategyTotals = useMemo(() => data.strategies.reduce((acc, s) => {
+    acc.traditional += s.traditional;
+    acc.active += s.active;
+    acc.research += s.research;
+    return acc;
+  }, { traditional: 0, active: 0, research: 0 }), [data.strategies]);
+
+  const hasDataForAnalysis = strategyTotals.traditional > 0 || strategyTotals.active > 0 || strategyTotals.research > 0;
 
   const generateInsight = async () => {
     setIsLoading(true);
-    setError('');
     setAiInsight('');
 
     if (!process.env.API_KEY) {
-      setError("مفتاح API غير مهيأ. يرجى الاتصال بالمسؤول.");
+      addToast("مفتاح API غير مهيأ. يرجى الاتصال بالمسؤول.", 'error');
       setIsLoading(false);
       return;
     }
@@ -162,7 +172,7 @@ const Reports: React.FC<ReportsProps> = ({ data, schoolInfo }) => {
           message = 'خطأ في الشبكة. يرجى التحقق من اتصالك بالإنترنت.';
         }
       }
-      setError(message);
+      addToast(message, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -171,27 +181,20 @@ const Reports: React.FC<ReportsProps> = ({ data, schoolInfo }) => {
   const handlePrint = () => {
     window.print();
   };
-  
-  const strategyTotals = data.strategies.reduce((acc, s) => {
-    acc.traditional += s.traditional;
-    acc.active += s.active;
-    acc.research += s.research;
-    return acc;
-  }, { traditional: 0, active: 0, research: 0 });
 
-  const strategyClassificationData = [
+  const strategyClassificationData = useMemo(() => [
     { name: 'تقليدي', value: strategyTotals.traditional, color: '#60A5FA' },
     { name: 'نشط', value: strategyTotals.active, color: '#34D399' },
     { name: 'بحثي', value: strategyTotals.research, color: '#FBBF24' },
-  ];
+  ], [strategyTotals]);
 
-  const experienceConeData = [
+  const experienceConeData = useMemo(() => [
       { name: 'الرموز اللفظية (كلمات ومحاضرات)', value: data.experienceCone.verbalSymbols, color: '#0088FE' },
       { name: 'الرموز البصرية (صور وفيديوهات)', value: data.experienceCone.visualSymbols, color: '#00C49F' },
       { name: 'الملاحظة الحسية (مشاهدات وعروض)', value: data.experienceCone.sensoryObservation, color: '#FFBB28' },
       { name: 'الخبرات البديلة (نماذج وعينات)', value: data.experienceCone.alternativeExperiences, color: '#FF8042' },
       { name: 'الخبرات المباشرة (تركيب وصيانة)', value: data.experienceCone.directExperiences, color: '#AF19FF' },
-  ];
+  ], [data.experienceCone]);
 
   return (
     <div className="p-8 bg-gray-50 min-h-full" dir="rtl">
@@ -201,7 +204,8 @@ const Reports: React.FC<ReportsProps> = ({ data, schoolInfo }) => {
         <div className="flex space-x-2 space-x-reverse">
             <button
               onClick={generateInsight}
-              disabled={isLoading}
+              disabled={isLoading || !hasDataForAnalysis}
+              title={!hasDataForAnalysis ? "لا توجد بيانات كافية للتحليل" : "تحليل بالذكاء الاصطناعي"}
               className="px-6 py-2 bg-custom-green text-white font-semibold rounded-lg shadow-sm hover:bg-custom-green/90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-custom-green transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isLoading ? '...جاري التحليل' : 'تحليل بالذكاء الاصطناعي'}
@@ -238,11 +242,10 @@ const Reports: React.FC<ReportsProps> = ({ data, schoolInfo }) => {
             </div>
         </section>
 
-        {(aiInsight || isLoading || error) && (
+        {(aiInsight || isLoading) && (
             <section className="mb-8 p-4 border border-custom-blue/30 rounded-lg bg-custom-blue/5 print:hidden">
                 <h3 className="text-xl font-semibold text-gray-700 mb-2">💡 تحليل الذكاء الاصطناعي</h3>
                 {isLoading && <p className="text-gray-600 animate-pulse">يتم الآن تحليل البيانات لتقديم رؤى قيمة...</p>}
-                {error && <p className="text-red-600">{error}</p>}
                 {aiInsight && <div className="text-gray-800 leading-relaxed"><SimpleMarkdown text={aiInsight} /></div>}
             </section>
         )}

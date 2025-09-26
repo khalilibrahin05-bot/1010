@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { SchoolInfo } from '../types';
 
 interface SettingsProps {
@@ -14,12 +14,12 @@ interface SettingsProps {
 const Settings: React.FC<SettingsProps> = ({ schoolInfo, setSchoolInfo, subjects, setSubjects, fontSize, setFontSize, onResetAllData }) => {
   const [newSubject, setNewSubject] = useState('');
 
-  const handleInfoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInfoChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const { name, value } = e.target;
     setSchoolInfo(prev => ({ ...prev, [name]: value }));
-  };
+  }, [setSchoolInfo]);
 
-  const handleLogoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleLogoChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const reader = new FileReader();
       reader.onload = (event) => {
@@ -27,24 +27,26 @@ const Settings: React.FC<SettingsProps> = ({ schoolInfo, setSchoolInfo, subjects
       };
       reader.readAsDataURL(e.target.files[0]);
     }
-  };
+  }, [setSchoolInfo]);
   
-  const handleImport = () => {
+  const handleImport = useCallback(() => {
     // This is a placeholder for the import functionality.
     alert('سيتم تنفيذ ميزة استيراد بيانات المعلمين والاستراتيجيات من ملفات Excel و PDF في التحديثات المستقبلية.');
-  };
+  }, []);
 
-  const handleAddSubject = () => {
+  const handleAddSubject = useCallback(() => {
     const trimmedSubject = newSubject.trim();
     if (trimmedSubject && !subjects.includes(trimmedSubject)) {
       setSubjects(prev => [...prev, trimmedSubject]);
       setNewSubject('');
     }
-  };
+  }, [newSubject, subjects, setSubjects]);
 
-  const handleDeleteSubject = (subjectToDelete: string) => {
-    setSubjects(prev => prev.filter(s => s !== subjectToDelete));
-  };
+  const handleDeleteSubject = useCallback((subjectToDelete: string) => {
+    if (window.confirm(`هل أنت متأكد من حذف المادة: ${subjectToDelete}؟`)) {
+        setSubjects(prev => prev.filter(s => s !== subjectToDelete));
+    }
+  }, [setSubjects]);
 
   return (
     <div className="p-8 bg-gray-50 min-h-full">
@@ -179,4 +181,4 @@ const Settings: React.FC<SettingsProps> = ({ schoolInfo, setSchoolInfo, subjects
   );
 };
 
-export default Settings;
+export default React.memo(Settings);

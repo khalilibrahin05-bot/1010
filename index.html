@@ -16,6 +16,15 @@
               'custom-yellow': '#F1C40F',
               'custom-red': '#E74C3C',
               'custom-teal': '#17A589',
+            },
+            animation: {
+              'toast-in': 'toast-in 0.5s ease-out forwards',
+            },
+            keyframes: {
+              'toast-in': {
+                'from': { transform: 'translateX(100%)', opacity: '0' },
+                'to': { transform: 'translateX(0)', opacity: '1' },
+              },
             }
           }
         }
